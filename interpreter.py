@@ -1,5 +1,6 @@
 from os import scandir
 from typing import Dict, Callable
+from struct import unpack
 from folders_types import CommandType, ExpressionType, TypeType
 
 dir_cache = {}
@@ -317,7 +318,18 @@ class Interpreter:
         return chr((self.eval_nibble(nibble_dirs[0]) << 4) | self.eval_nibble(nibble_dirs[1]))
 
     def eval_float(self, float_dir: str):
-        pass
+        v = get_dir(float_dir)
+        assert(len(v) == 8)
+
+        raw_bytes = bytearray([])
+        for i in range(8):
+            nibble = self.eval_nibble(v[i])
+            if i % 2 == 0:
+                raw_bytes.append(nibble << 4)
+            else:
+                raw_bytes[i//2] |= nibble
+
+        return unpack("f", raw_bytes[::-1])[0]
 
     def eval_nibble(self, nibble_dir: str):
         n = get_dir(nibble_dir)

@@ -2,6 +2,7 @@ from typing import List
 from string import ascii_lowercase
 from subprocess import getoutput
 from os import walk
+from ctypes import c_float
 
 from folders_types import CommandType, ExpressionType, TypeType
 
@@ -228,7 +229,8 @@ class FoldersCompiler:
                         self.encode_int(expr.value, e[2])
 
                     case TypeType.Float:
-                        pass
+                        assert(isinstance(expr, FloatLit))
+                        self.encode_float(expr.value, e[2])
 
                     case TypeType.String:
                         assert(isinstance(expr, StrLit))
@@ -273,7 +275,10 @@ class FoldersCompiler:
         self.encode_nibble(char_value & 0xf, dest)
 
     def encode_float(self, value: float, dest: List):
-        pass
+        byte_repr = bytes(c_float(value))[::-1]
+        for byte in byte_repr:
+            self.encode_nibble(byte >> 4, dest)
+            self.encode_nibble(byte & 0xf, dest)
 
     def encode_nibble(self, value: int, dest: List):
         dest.append(encoded_nibbles[value])
