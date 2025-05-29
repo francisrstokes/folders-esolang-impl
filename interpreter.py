@@ -1,5 +1,5 @@
 from os import scandir
-from typing import Dict
+from typing import Dict, Callable
 from folders_types import CommandType, ExpressionType, TypeType
 
 dir_cache = {}
@@ -19,6 +19,40 @@ def get_dir_count(dir: str):
     len_cache[dir] = dir_len
     return dir_len
 
+def as_i32(v: int):
+    v &= 0xffffffff
+    if v >= 0x80000000:
+        return -((v ^ 0xffffffff) + 1)
+    return v
+
+def compare_on_type(compare_fn: Callable[[int | float | str, int | float | str], int]):
+    def compare(lhs: int | float | str, rhs: int | float | str, lhs_type: TypeType, rhs_type: TypeType):
+        if lhs_type == rhs_type:
+            return int(compare_fn(lhs, rhs))
+
+        match lhs_type:
+            case TypeType.Int | TypeType.Float:
+                assert(rhs_type != TypeType.String)
+                match rhs_type:
+                    case TypeType.Int | TypeType.Float:
+                        return int(compare_fn(lhs, rhs))
+                    case TypeType.Char:
+                        return int(compare_fn(lhs, ord(rhs))) # type: ignore
+            case TypeType.String:
+                assert(rhs_type not in [TypeType.Int, TypeType.Float])
+                return int(compare_fn(lhs, rhs))
+            case TypeType.Char:
+                match rhs_type:
+                    case TypeType.Int | TypeType.Float:
+                        return int(compare_fn(ord(lhs), rhs)) # type: ignore
+                    case _:
+                        return int(compare_fn(lhs, ord(rhs))) # type: ignore
+    return compare
+
+eq = compare_on_type(lambda x, y: x == y)
+lt = compare_on_type(lambda x, y: x < y) # type: ignore
+gt = compare_on_type(lambda x, y: x > y) # type: ignore
+
 class Var:
     def __init__(self, type: TypeType):
         self.type = type
@@ -31,18 +65,7 @@ class Var:
             case TypeType.String:
                 self.value = ''
             case TypeType.Float:
-                self.value = 0
-
-    def update(self, value):
-        match self.type:
-            case TypeType.Int:
-                self.value = int(value)
-            case TypeType.Char:
-                self.value = str(value)[0]
-            case TypeType.String:
-                self.value = str(value)
-            case TypeType.Float:
-                self.value = float(value)
+                self.value = 0.0
 
 class Interpreter:
     def __init__(self):
@@ -83,7 +106,7 @@ class Interpreter:
                 assert(var_name in self.vars)
 
                 expr_value = self.eval_expression(c[2])
-                self.vars[var_name].update(expr_value)
+                self.vars[var_name].value = expr_value # type: ignore
 
             case CommandType.Print:
                 value = self.eval_expression(c[1])
@@ -94,7 +117,15 @@ class Interpreter:
                 assert(var_name in self.vars)
 
                 input_value = input()
-                self.vars[var_name].update(input_value)
+                match self.vars[var_name].type:
+                    case TypeType.Int:
+                        self.vars[var_name].value = int(input_value)
+                    case TypeType.Char:
+                        self.vars[var_name].value = str(input_value)[0]
+                    case TypeType.String:
+                        self.vars[var_name].value = str(input_value)
+                    case TypeType.Float:
+                        self.vars[var_name].value = float(input_value)
 
             case _:
                 raise Exception(f"Invalid command: {command_type}")
@@ -114,25 +145,61 @@ class Interpreter:
                 assert(len(e) == 3)
                 lhs = self.eval_expression(e[1])
                 rhs = self.eval_expression(e[2])
-                return lhs + rhs
+
+                expr_type = self.determine_expr_type(expr_dir)
+                match expr_type:
+                    case TypeType.Int:
+                        return as_i32(lhs + rhs)
+                    case TypeType.String | TypeType.Float:
+                        return lhs + rhs
+                    case TypeType.Char:
+                        return chr((ord(lhs) + ord(rhs)) & 0xff)
 
             case ExpressionType.Subtract:
                 assert(len(e) == 3)
                 lhs = self.eval_expression(e[1])
                 rhs = self.eval_expression(e[2])
-                return lhs - rhs
+
+                expr_type = self.determine_expr_type(expr_dir)
+                assert(expr_type != TypeType.String)
+
+                match expr_type:
+                    case TypeType.Int:
+                        return as_i32(lhs - rhs)
+                    case TypeType.Float:
+                        return lhs - rhs
+                    case TypeType.Char:
+                        return chr((ord(lhs) - ord(rhs)) & 0xff)
 
             case ExpressionType.Multiply:
                 assert(len(e) == 3)
                 lhs = self.eval_expression(e[1])
                 rhs = self.eval_expression(e[2])
-                return lhs * rhs
+
+                expr_type = self.determine_expr_type(expr_dir)
+                assert(not expr_type in [TypeType.String, TypeType.Char])
+
+                match expr_type:
+                    case TypeType.Int:
+                        return as_i32(lhs * rhs)
+                    case TypeType.Float:
+                        return lhs * rhs
 
             case ExpressionType.Divide:
                 assert(len(e) == 3)
                 lhs = self.eval_expression(e[1])
                 rhs = self.eval_expression(e[2])
-                return lhs // rhs
+
+                expr_type = self.determine_expr_type(expr_dir)
+                assert(expr_type != TypeType.String)
+
+                match expr_type:
+                    case TypeType.Int:
+                        return as_i32(lhs // rhs)
+                    case TypeType.Float:
+                        return lhs / rhs
+                    case TypeType.Char:
+                        return chr(ord(lhs) // ord(rhs))
 
             case ExpressionType.LiteralValue:
                 assert(len(e) == 3)
@@ -157,23 +224,67 @@ class Interpreter:
                 assert(len(e) == 3)
                 lhs = self.eval_expression(e[1])
                 rhs = self.eval_expression(e[2])
-                return int(lhs == rhs)
+                lhs_type = self.determine_expr_type(e[1])
+                rhs_type = self.determine_expr_type(e[2])
+
+                return eq(lhs, rhs, lhs_type, rhs_type)
 
             case ExpressionType.GreaterThan:
                 assert(len(e) == 3)
                 lhs = self.eval_expression(e[1])
                 rhs = self.eval_expression(e[2])
-                return int(lhs > rhs)
+                lhs_type = self.determine_expr_type(e[1])
+                rhs_type = self.determine_expr_type(e[2])
+
+                return gt(lhs, rhs, lhs_type, rhs_type)
 
             case ExpressionType.LessThan:
                 assert(len(e) == 3)
                 lhs = self.eval_expression(e[1])
                 rhs = self.eval_expression(e[2])
-                return int(lhs < rhs)
+                lhs_type = self.determine_expr_type(e[1])
+                rhs_type = self.determine_expr_type(e[2])
+
+                return lt(lhs, rhs, lhs_type, rhs_type)
 
             case _:
                 raise Exception(f"Invalid expression: {expr_type}")
 
+    def determine_expr_type(self, expr_dir: str) -> TypeType:
+        e = get_dir(expr_dir)
+        assert(len(e) >= 2)
+
+        expr_type = e[0]
+        match get_dir_count(expr_type):
+            case ExpressionType.Variable:
+                var_name = self.eval_str(e[1])
+                assert(var_name in self.vars)
+                return self.vars[var_name].type
+
+            case ExpressionType.Add:
+                assert(len(e) == 3)
+                lhs = self.determine_expr_type(e[1])
+                rhs = self.determine_expr_type(e[2])
+                if lhs != rhs:
+                    assert(lhs == TypeType.String and rhs == TypeType.Char)
+                    return TypeType.String
+                return lhs
+
+            case ExpressionType.Subtract | ExpressionType.Multiply | ExpressionType.Divide:
+                assert(len(e) == 3)
+                lhs = self.determine_expr_type(e[1])
+                rhs = self.determine_expr_type(e[2])
+                assert(lhs == rhs)
+                return lhs
+
+            case ExpressionType.LiteralValue:
+                return TypeType(get_dir_count(e[1]))
+
+            case ExpressionType.EqualTo | ExpressionType.GreaterThan | ExpressionType.LessThan:
+                return TypeType.Int
+
+            case _:
+                raise Exception(f"Invalid expression: {expr_type}")
 
     def eval_int(self, int_dir: str):
         v = get_dir(int_dir)
