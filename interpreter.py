@@ -1,24 +1,29 @@
 from os import scandir
-from typing import Dict, Callable
+from typing import Dict, Callable, List
 from struct import unpack
 from folders_types import CommandType, ExpressionType, TypeType
 
 dir_cache = {}
 len_cache = {}
+expr_type_cache = {}
+expr_cache = {}
 
-def get_dir(dir: str):
+def get_dir(dir: str) -> List[str]:
     if dir in dir_cache:
         return dir_cache[dir]
     dirs = sorted([d.path for d in scandir(dir) if d.is_dir()])
     dir_cache[dir] = dirs
     return dirs
 
-def get_dir_count(dir: str):
+def get_dir_count(dir: str) -> int:
     if dir in len_cache:
         return len_cache[dir]
     dir_len = len([d.path for d in scandir(dir) if d.is_dir()])
     len_cache[dir] = dir_len
     return dir_len
+
+def get_dir_count_no_cache(dir: str):
+    return len([d.path for d in scandir(dir) if d.is_dir()])
 
 def as_i32(v: int):
     v &= 0xffffffff
@@ -97,13 +102,13 @@ class Interpreter:
             case CommandType.Declare:
                 assert(len(c) == 3)
                 type_type = TypeType(get_dir_count(c[1]))
-                var_name = self.eval_str(c[2])
+                var_name = self.eval_str(command_dir, c[2])
                 assert(var_name not in self.vars)
                 self.vars[var_name] = Var(type_type)
 
             case CommandType.Let:
                 assert(len(c) == 3)
-                var_name = self.eval_str(c[1])
+                var_name = self.eval_str(command_dir, c[1])
                 assert(var_name in self.vars)
 
                 expr_value = self.eval_expression(c[2])
@@ -114,7 +119,7 @@ class Interpreter:
                 print(value, end="")
 
             case CommandType.Input:
-                var_name = self.eval_str(c[1])
+                var_name = self.eval_str(command_dir, c[1])
                 assert(var_name in self.vars)
 
                 input_value = input()
@@ -131,14 +136,21 @@ class Interpreter:
             case _:
                 raise Exception(f"Invalid command: {command_type}")
 
+    def expression_is_literal(self, expr_dir: str):
+        e = get_dir(expr_dir)
+        return get_dir_count(e[0]) == ExpressionType.LiteralValue
+
     def eval_expression(self, expr_dir: str):
+        if expr_dir in expr_cache:
+            return expr_cache[expr_dir]
+
         e = get_dir(expr_dir)
         assert(len(e) >= 2)
 
         expr_type = e[0]
         match get_dir_count(expr_type):
             case ExpressionType.Variable:
-                var_name = self.eval_str(e[1])
+                var_name = self.eval_str(expr_dir + "_var", e[1])
                 assert(var_name in self.vars)
                 return self.vars[var_name].value
 
@@ -150,11 +162,16 @@ class Interpreter:
                 expr_type = self.determine_expr_type(expr_dir)
                 match expr_type:
                     case TypeType.Int:
-                        return as_i32(lhs + rhs)
+                        value = as_i32(lhs + rhs)
                     case TypeType.String | TypeType.Float:
-                        return lhs + rhs
+                        value = lhs + rhs
                     case TypeType.Char:
-                        return chr((ord(lhs) + ord(rhs)) & 0xff)
+                        value = chr((ord(lhs) + ord(rhs)) & 0xff)
+
+                if self.expression_is_literal(e[1]) and self.expression_is_literal(e[2]):
+                    expr_cache[expr_dir] = value
+
+                return value
 
             case ExpressionType.Subtract:
                 assert(len(e) == 3)
@@ -166,11 +183,16 @@ class Interpreter:
 
                 match expr_type:
                     case TypeType.Int:
-                        return as_i32(lhs - rhs)
+                        value = as_i32(lhs - rhs)
                     case TypeType.Float:
-                        return lhs - rhs
+                        value = lhs - rhs
                     case TypeType.Char:
-                        return chr((ord(lhs) - ord(rhs)) & 0xff)
+                        value = chr((ord(lhs) - ord(rhs)) & 0xff)
+
+                if self.expression_is_literal(e[1]) and self.expression_is_literal(e[2]):
+                    expr_cache[expr_dir] = value
+
+                return value
 
             case ExpressionType.Multiply:
                 assert(len(e) == 3)
@@ -182,9 +204,14 @@ class Interpreter:
 
                 match expr_type:
                     case TypeType.Int:
-                        return as_i32(lhs * rhs)
-                    case TypeType.Float:
-                        return lhs * rhs
+                        value = as_i32(lhs * rhs)
+                    case _:
+                        value = lhs * rhs
+
+                if self.expression_is_literal(e[1]) and self.expression_is_literal(e[2]):
+                    expr_cache[expr_dir] = value
+
+                return value
 
             case ExpressionType.Divide:
                 assert(len(e) == 3)
@@ -196,30 +223,38 @@ class Interpreter:
 
                 match expr_type:
                     case TypeType.Int:
-                        return as_i32(lhs // rhs)
+                        value = as_i32(lhs // rhs)
                     case TypeType.Float:
-                        return lhs / rhs
+                        value = lhs / rhs
                     case TypeType.Char:
-                        return chr(ord(lhs) // ord(rhs))
+                        value = chr(ord(lhs) // ord(rhs))
+
+                if self.expression_is_literal(e[1]) and self.expression_is_literal(e[2]):
+                    expr_cache[expr_dir] = value
+
+                return value
 
             case ExpressionType.LiteralValue:
                 assert(len(e) == 3)
                 lit_type = get_dir_count(e[1])
                 match lit_type:
                     case TypeType.Int:
-                        return self.eval_int(e[2])
+                        value = self.eval_int(e[2])
 
                     case TypeType.Float:
-                        return self.eval_float(e[2])
+                        value = self.eval_float(e[2])
 
                     case TypeType.String:
-                        return self.eval_str(e[2])
+                        return self.eval_str(expr_dir, e[2])
 
                     case TypeType.Char:
-                        return self.eval_char(e[2])
+                        value = self.eval_char(e[2])
 
                     case _:
                         raise Exception(f"Invalid literal: {lit_type}")
+
+                expr_cache[expr_dir] = value
+                return value
 
             case ExpressionType.EqualTo:
                 assert(len(e) == 3)
@@ -228,7 +263,12 @@ class Interpreter:
                 lhs_type = self.determine_expr_type(e[1])
                 rhs_type = self.determine_expr_type(e[2])
 
-                return eq(lhs, rhs, lhs_type, rhs_type)
+                value = eq(lhs, rhs, lhs_type, rhs_type)
+
+                if self.expression_is_literal(e[1]) and self.expression_is_literal(e[2]):
+                    expr_cache[expr_dir] = value
+
+                return value
 
             case ExpressionType.GreaterThan:
                 assert(len(e) == 3)
@@ -237,7 +277,12 @@ class Interpreter:
                 lhs_type = self.determine_expr_type(e[1])
                 rhs_type = self.determine_expr_type(e[2])
 
-                return gt(lhs, rhs, lhs_type, rhs_type)
+                value = gt(lhs, rhs, lhs_type, rhs_type)
+
+                if self.expression_is_literal(e[1]) and self.expression_is_literal(e[2]):
+                    expr_cache[expr_dir] = value
+
+                return value
 
             case ExpressionType.LessThan:
                 assert(len(e) == 3)
@@ -246,21 +291,29 @@ class Interpreter:
                 lhs_type = self.determine_expr_type(e[1])
                 rhs_type = self.determine_expr_type(e[2])
 
-                return lt(lhs, rhs, lhs_type, rhs_type)
+                value = lt(lhs, rhs, lhs_type, rhs_type)
+
+                if self.expression_is_literal(e[1]) and self.expression_is_literal(e[2]):
+                    expr_cache[expr_dir] = value
+
+                return value
 
             case _:
                 raise Exception(f"Invalid expression: {expr_type}")
 
     def determine_expr_type(self, expr_dir: str) -> TypeType:
+        if expr_dir in expr_type_cache:
+            return expr_type_cache[expr_dir]
         e = get_dir(expr_dir)
         assert(len(e) >= 2)
 
         expr_type = e[0]
         match get_dir_count(expr_type):
             case ExpressionType.Variable:
-                var_name = self.eval_str(e[1])
+                var_name = self.eval_str(expr_dir + "_var", e[1])
                 assert(var_name in self.vars)
-                return self.vars[var_name].type
+                expr_type_cache[expr_dir] = self.vars[var_name].type
+                return expr_type_cache[expr_dir]
 
             case ExpressionType.Add:
                 assert(len(e) == 3)
@@ -268,21 +321,26 @@ class Interpreter:
                 rhs = self.determine_expr_type(e[2])
                 if lhs != rhs:
                     assert(lhs == TypeType.String and rhs == TypeType.Char)
-                    return TypeType.String
-                return lhs
+                    expr_type_cache[expr_dir] = TypeType.String
+                    return expr_type_cache[expr_dir]
+                expr_type_cache[expr_dir] = lhs
+                return expr_type_cache[expr_dir]
 
             case ExpressionType.Subtract | ExpressionType.Multiply | ExpressionType.Divide:
                 assert(len(e) == 3)
                 lhs = self.determine_expr_type(e[1])
                 rhs = self.determine_expr_type(e[2])
                 assert(lhs == rhs)
-                return lhs
+                expr_type_cache[expr_dir] = lhs
+                return expr_type_cache[expr_dir]
 
             case ExpressionType.LiteralValue:
-                return TypeType(get_dir_count(e[1]))
+                expr_type_cache[expr_dir] = TypeType(get_dir_count(e[1]))
+                return expr_type_cache[expr_dir]
 
             case ExpressionType.EqualTo | ExpressionType.GreaterThan | ExpressionType.LessThan:
-                return TypeType.Int
+                expr_type_cache[expr_dir] = TypeType.Int
+                return expr_type_cache[expr_dir]
 
             case _:
                 raise Exception(f"Invalid expression: {expr_type}")
@@ -301,7 +359,10 @@ class Interpreter:
 
         return value
 
-    def eval_str(self, str_dir: str):
+    def eval_str(self, expr_dir: str, str_dir: str):
+        if expr_dir in expr_cache:
+            return expr_cache[expr_dir]
+
         bs = get_dir(str_dir)
         value = bytearray([])
 
@@ -310,12 +371,15 @@ class Interpreter:
             assert(len(nibble_dirs) == 2)
             value.append((self.eval_nibble(nibble_dirs[0]) << 4) | self.eval_nibble(nibble_dirs[1]))
 
-        return value.decode("utf-8")
+        value = value.decode("utf-8")
+        expr_cache[expr_dir] = value
+        return value
 
     def eval_char(self, char_dir: str):
         nibble_dirs = get_dir(char_dir)
         assert(len(nibble_dirs) == 2)
-        return chr((self.eval_nibble(nibble_dirs[0]) << 4) | self.eval_nibble(nibble_dirs[1]))
+        value = chr((self.eval_nibble(nibble_dirs[0]) << 4) | self.eval_nibble(nibble_dirs[1]))
+        return value
 
     def eval_float(self, float_dir: str):
         v = get_dir(float_dir)
@@ -329,7 +393,8 @@ class Interpreter:
             else:
                 raw_bytes[i//2] |= nibble
 
-        return unpack("f", raw_bytes[::-1])[0]
+        value = unpack("f", raw_bytes[::-1])[0]
+        return value
 
     def eval_nibble(self, nibble_dir: str):
         n = get_dir(nibble_dir)
@@ -337,7 +402,7 @@ class Interpreter:
 
         nibble = 0
         for i, bit_dir in enumerate(n):
-            nibble |= get_dir_count(bit_dir) << (3 - i)
+            nibble |= get_dir_count_no_cache(bit_dir) << (3 - i)
         return nibble
 
 
