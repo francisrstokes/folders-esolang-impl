@@ -1,6 +1,7 @@
 from os import scandir
 from typing import Dict, Callable, List
 from struct import unpack
+from argparse import ArgumentParser
 from folders_types import CommandType, ExpressionType, TypeType
 
 dir_cache = {}
@@ -405,7 +406,11 @@ class Interpreter:
             nibble |= get_dir_count_no_cache(bit_dir) << (3 - i)
         return nibble
 
+if __name__ == "__main__":
+    arg_parser = ArgumentParser()
+    arg_parser.add_argument("--input", "-i", help="Input folders directory", required=True)
+    args = arg_parser.parse_args()
 
-program_dir = "build"
-interpreter = Interpreter()
-interpreter.execute_commands(program_dir)
+    program_dir = args.input
+    interpreter = Interpreter()
+    interpreter.execute_commands(program_dir)

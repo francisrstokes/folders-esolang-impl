@@ -1,0 +1,67 @@
+
+# Implements the following python program:
+#
+# for y in range(128):
+#     for x in range(128):
+#         value = ' ' if (x & y) > 0 else 'v'
+#         print(value, end="")
+#     print("")
+
+int x   # Tracks the x position
+int y   # Tracks the y position
+int xm  # --+
+int ym  #   |
+int xs  #   |
+int ys  #   |   Intermediate variables for computing
+int xb  #   |   `(x & y) > 0`
+int yb  #   |
+int xy  #   |
+int p   # --+
+int i   # Loop variable
+int j   # Loop variable
+char v  # The output character ('v' or ' ')
+
+# Set s to 1 to get the dimensions as input
+int s
+s = 1
+
+if s == 0:
+    print("x max >> ")
+    input(xm)
+    print("y max >> ")
+    input(ym)
+if s == 1:
+    xm = 64
+    ym = 64
+
+while y < ym:
+    x = 0
+    while x < xm:
+        i = 0
+        v = 'v'
+
+        while i < 7:
+            j = 0
+            p = 1
+
+            while j <  i:
+                p = p * 2
+                j = j + 1
+
+            xs = x / p
+            ys = y / p
+
+            xb = xs - (xs / 2) * 2
+            yb = ys - (ys / 2) * 2
+
+            xy = xb + yb
+
+            if xy == 2:
+                v = ' '
+
+            i = i + 1
+
+        print(v)
+        x = x + 1
+    print('\n')
+    y = y + 1

@@ -1,0 +1,7 @@
+string username
+
+print("What's your name >> ")
+input(username)
+print("Hello, ")
+print(username)
+print('\n')

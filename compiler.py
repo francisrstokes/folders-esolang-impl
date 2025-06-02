@@ -3,133 +3,13 @@ from string import ascii_lowercase
 from subprocess import getoutput
 from os import walk
 from ctypes import c_float
+from argparse import ArgumentParser
 
-from folders_types import CommandType, ExpressionType, TypeType
+from folders_types import CommandType, ExpressionType, TypeType, Command, Expression, If, \
+    While, Declare, Let, Print, Input, Lit, IntLit, FloatLit, StrLit, CharLit, EqualTo, \
+        LessThan, GreaterThan, Add, Subtract, Multiply, Divide, Variable
 
-class Command:
-    def __init__(self, command_type: CommandType):
-        self.command_type = command_type
-
-class Expression:
-    def __init__(self, expr_type: ExpressionType):
-        self.expr_type = expr_type
-
-# Commands
-class If(Command):
-    def __init__(self, expr: Expression, commands: List[Command]):
-        super().__init__(CommandType.If)
-        self.expr = expr
-        self.commands = commands
-
-class While(Command):
-    def __init__(self, expr: Expression, commands: List[Command]):
-        super().__init__(CommandType.While)
-        self.expr = expr
-        self.commands = commands
-
-class Declare(Command):
-    def __init__(self, type: TypeType, var_name: str):
-        super().__init__(CommandType.Declare)
-        self.type = type
-        self.var_name = var_name
-
-class Let(Command):
-    def __init__(self, var_name: str, value: Expression):
-        super().__init__(CommandType.Let)
-        self.var_name = var_name
-        self.value = value
-
-class Print(Command):
-    def __init__(self, expr: Expression):
-        super().__init__(CommandType.Print)
-        self.expr = expr
-
-class Input(Command):
-    def __init__(self, var_name: str):
-        super().__init__(CommandType.Input)
-        self.var_name = var_name
-
-# Expressions (Literals)
-class Lit(Expression):
-    def __init__(self, lit_type: TypeType):
-        super().__init__(ExpressionType.LiteralValue)
-        self.lit_type = lit_type
-
-class IntLit(Lit):
-    def __init__(self, value: int):
-        assert(value >= -2147483647 and value <= 0xffffffff)
-
-        super().__init__(TypeType.Int)
-
-        self.value = value
-        if self.value < 0:
-            self.value = (-self.value ^ 0xffffffff) + 1
-
-class FloatLit(Lit):
-    def __init__(self, value: float):
-        super().__init__(TypeType.Float)
-        self.value = value
-
-class StrLit(Lit):
-    def __init__(self, value: str):
-        super().__init__(TypeType.String)
-        self.value = value
-
-class CharLit(Lit):
-    def __init__(self, value: str):
-        assert(len(value) == 1)
-        super().__init__(TypeType.Char)
-        self.value = value
-
-# Expressions (Comparisons)
-class EqualTo(Expression):
-    def __init__(self, lhs: Expression, rhs: Expression):
-        super().__init__(ExpressionType.EqualTo)
-        self.lhs = lhs
-        self.rhs = rhs
-
-class LessThan(Expression):
-    def __init__(self, lhs: Expression, rhs: Expression):
-        super().__init__(ExpressionType.LessThan)
-        self.lhs = lhs
-        self.rhs = rhs
-
-class GreaterThan(Expression):
-    def __init__(self, lhs: Expression, rhs: Expression):
-        super().__init__(ExpressionType.GreaterThan)
-        self.lhs = lhs
-        self.rhs = rhs
-
-# Expressions (Arithmetic)
-class Add(Expression):
-    def __init__(self, lhs: Expression, rhs: Expression):
-        super().__init__(ExpressionType.Add)
-        self.lhs = lhs
-        self.rhs = rhs
-
-class Subtract(Expression):
-    def __init__(self, lhs: Expression, rhs: Expression):
-        super().__init__(ExpressionType.Subtract)
-        self.lhs = lhs
-        self.rhs = rhs
-
-class Multiply(Expression):
-    def __init__(self, lhs: Expression, rhs: Expression):
-        super().__init__(ExpressionType.Multiply)
-        self.lhs = lhs
-        self.rhs = rhs
-
-class Divide(Expression):
-    def __init__(self, lhs: Expression, rhs: Expression):
-        super().__init__(ExpressionType.Divide)
-        self.lhs = lhs
-        self.rhs = rhs
-
-# Expressions (Variable)
-class Variable(Expression):
-    def __init__(self, var_name: str):
-        super().__init__(ExpressionType.Variable)
-        self.var_name = var_name
+from parser import program_parser
 
 encoded_nibbles = [ list(map(lambda b: [[]] if b == '1' else [], list(f"{i:04b}"))) for i in range(16) ]
 
@@ -318,75 +198,22 @@ class FoldersCompiler:
 
         return out
 
-test_program: List[Command] = [
-    # Serpinsky
-    Declare(TypeType.Int, "x"),
-    Declare(TypeType.Int, "y"),
-    Declare(TypeType.Int, "xm"),
-    Declare(TypeType.Int, "ym"),
-    Declare(TypeType.Int, "i"),
-    Declare(TypeType.Int, "j"),
-    Declare(TypeType.Int, "p"),
-    Declare(TypeType.Int, "xs"),
-    Declare(TypeType.Int, "ys"),
-    Declare(TypeType.Int, "xb"),
-    Declare(TypeType.Int, "yb"),
-    Declare(TypeType.Int, "xy"),
-    Declare(TypeType.Char, "v"),
+if __name__ == "__main__":
+    arg_parser = ArgumentParser()
+    arg_parser.add_argument("--input", "-i", help="Input folderscript program", required=True)
+    arg_parser.add_argument("--output", "-o", help="Output directory", required=True)
+    arg_parser.add_argument("--verbose", "-v", help="Verbose mode", action="store_true")
+    args = arg_parser.parse_args()
 
-    Print(StrLit("x max >> ")),
-    Input("xm"),
-    Print(StrLit("y max >> ")),
-    Input("ym"),
+    with open(args.input, "r") as f:
+        script = f.read()
 
-    While(LessThan(Variable("y"), Variable("ym")), [
-        Let("x", IntLit(0)),
-        While(LessThan(Variable("x"), Variable("xm")), [
-            Let("i", IntLit(0)),
-            Let("v", CharLit('v')),
+    parsed = program_parser.parse(script)
 
-            While(LessThan(Variable("i"), IntLit(7)), [
-                Let("j", IntLit(0)),
-                Let("p", IntLit(1)),
+    build_dir = args.output
+    compiler = FoldersCompiler()
+    compiler.compile(parsed, True, build_dir)
 
-                While(LessThan(Variable("j"), Variable("i")), [
-                    Let("p", Multiply(Variable("p"), IntLit(2))),
-                    Let("j", Add(Variable("j"), IntLit(1))),
-                ]),
-
-                Let("xs", Divide(Variable("x"), Variable("p"))),
-                Let("ys", Divide(Variable("y"), Variable("p"))),
-
-                Let("xb", Subtract(Variable("xs"), Multiply(Divide(Variable("xs"), IntLit(2)), IntLit(2)))),
-                Let("yb", Subtract(Variable("ys"), Multiply(Divide(Variable("ys"), IntLit(2)), IntLit(2)))),
-
-                Let("xy", Add(Variable("xb"), Variable("yb"))),
-
-                If(EqualTo(Variable("xy"), IntLit(2)), [
-                    Let("v", CharLit(' ')),
-                ]),
-
-                Let("i", Add(Variable("i"), IntLit(1))),
-            ]),
-
-            Print(Variable("v")),
-
-            Let("x", Add(Variable("x"), IntLit(1))),
-        ]),
-        Print(CharLit("\n")),
-        Let("y", Add(Variable("y"), IntLit(1))),
-    ]),
-]
-
-build_dir = 'build'
-compiler = FoldersCompiler()
-compiler.compile(test_program, True, build_dir)
-
-folders_created = len([x for x in walk(build_dir)]) - 1
-print(f"Program compiled to {folders_created} folders")
-
-# json_encoded = []
-# compiler.encode_commands(test_program, json_encoded)
-# with open(f"{build_dir}.json", "w") as f:
-#     f.write(str(json_encoded))
-#     f.write('\n')
+    if args.verbose:
+        folders_created = len([x for x in walk(build_dir)]) - 1
+        print(f"Program compiled to {folders_created} folders")
